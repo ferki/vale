@@ -81,7 +81,7 @@ func (l Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error {
 				walker.close()
 			}
 		} else if tokt == html.StartTagToken {
-			if (txt == "em" || txt == "b") && walker.lastTag() == "code" {
+			if (txt == "em" || txt == "b") && walker.lastTag(1) == "code" {
 				// FIXME: See https://github.com/errata-ai/vale/issues/421
 				txt = "code"
 			}
@@ -101,10 +101,11 @@ func (l Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error {
 					// once as part of the overall paragraph. See issue #105
 					// for more info.
 					tempCtx := updateContext(walker.context, walker.queue)
+					ctxScope := getScope(walker.tagHistory, scope, f.RealExt)
 
 					err := l.lintBlock(
 						f,
-						nlp.NewBlock(tempCtx, txt, scope),
+						nlp.NewBlock(tempCtx, txt, ctxScope),
 						walker.lines,
 						0,
 						true)
@@ -126,7 +127,7 @@ func (l Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error {
 		if tokt == html.EndTagToken && !core.StringInSlice(txt, inlineTags) {
 			content := buf.String()
 			if strings.TrimSpace(content) != "" {
-				err := l.lintScope(f, walker, content)
+				err := l.lintScope(f, &walker, content)
 				if err != nil {
 					return err
 				}
@@ -147,7 +148,7 @@ func (l Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error {
 	return l.lintSizedScopes(f)
 }
 
-func (l Linter) lintScope(f *core.File, state walker, txt string) error {
+func (l Linter) lintScope(f *core.File, state *walker, txt string) error {
 	for _, tag := range state.tagHistory {
 		scope, match := tagToScope[tag]
 		if (match && !core.StringInSlice(tag, inlineTags)) || heading.MatchString(tag) {
@@ -162,6 +163,7 @@ func (l Linter) lintScope(f *core.File, state walker, txt string) error {
 
 			txt = strings.TrimLeft(txt, " ")
 			b := state.block(txt, scope+f.RealExt)
+
 			return l.lintBlock(f, b, state.lines, 0, false)
 		}
 	}
@@ -245,10 +247,14 @@ func clean(txt, attr string, skip, inline bool) (string, bool) {
 	punct := []string{".", "?", "!", ",", ":", ";"}
 	first, _ := utf8.DecodeRuneInString(txt)
 	starter := core.StringInSlice(string(first), punct) && !skip
-	if skip || attr == txt {
+	if skip || attr == txt || inline {
 		txt, _ = core.Substitute(txt, txt, '*')
+	}
+
+	if skip || attr == txt {
 		skip = false
 	}
+
 	if inline && !starter {
 		txt = " " + txt
 	}
@@ -284,4 +290,21 @@ func updateCtx(ctx, txt string, tokt html.TokenType) string {
 		}
 	}
 	return ctx
+}
+
+func getScope(tags []string, new, ext string) string {
+	root := tags[0]
+	if root == "ul" {
+		root = "li"
+	} else if root == "p" {
+		root = ""
+	}
+
+	scope, match := tagToScope[root]
+	if !match && heading.MatchString(root) {
+		scope = "text.heading." + root
+	}
+
+	ctx := strings.Join([]string{scope, new}, ".")
+	return strings.TrimPrefix(ctx, ".") + ext
 }

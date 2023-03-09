@@ -13,31 +13,47 @@ type Selector struct {
 }
 
 type Scope struct {
-	Selectors []Selector
+	Selectors map[string][]Selector
+	Sized     bool
 }
 
 func NewScope(value []string) Scope {
-	selectors := []Selector{}
+	scope := map[string][]Selector{}
+
 	for _, v := range value {
-		selectors = append(selectors, NewSelector(strings.Split(v, ".")))
+		selectors := []Selector{}
+		for _, part := range strings.Split(v, "&") {
+			selectors = append(selectors, NewSelector(strings.Split(part, ".")))
+		}
+		scope[v] = selectors
 	}
-	return Scope{Selectors: selectors}
+
+	sized := false
+	if len(value) == 1 {
+		sized = value[0] == "raw" || value[0] == "summary" || value[0] == "text"
+	}
+
+	return Scope{Selectors: scope, Sized: sized}
 }
 
 // Macthes the scope `s` matches `s2`.
 func (s Scope) Matches(blk string) bool {
-	candidate := NewSelector(strings.Split(blk, "."))
+	candidate := NewSelector([]string{blk})
+	if candidate.isSized() {
+		// TODO: ensure scope == candidate
+		return s.Sized
+	}
+
 	for _, sel := range s.Selectors {
-		matched := candidate.Contains(sel)
-		if sel.Negated && !matched {
-			if !(candidate.Has("raw") || candidate.Has("summary")) {
-				return true
+		for _, part := range sel {
+			matched := candidate.Contains(part)
+			if (!part.Negated && !matched) || (part.Negated && matched) {
+				return false
 			}
-		} else if !sel.Negated && matched {
-			return true
 		}
 	}
-	return false
+
+	return true
 }
 
 func NewSelector(value []string) Selector {
@@ -45,6 +61,7 @@ func NewSelector(value []string) Selector {
 
 	parts := []string{}
 	for i, m := range value {
+		m = strings.TrimSpace(m)
 		if i == 0 && strings.HasPrefix(m, "~") {
 			m = strings.TrimPrefix(m, "~")
 			negated = true
@@ -97,4 +114,9 @@ func (s *Selector) Equal(sel Selector) bool {
 // Has determines if s has a part equal to scope.
 func (s *Selector) Has(scope string) bool {
 	return core.StringInSlice(scope, s.Sections())
+}
+
+func (s *Selector) isSized() bool {
+	parts := s.Sections()
+	return (s.Has("raw") || s.Has("summary") || s.Has("text")) && len(parts) == 2
 }

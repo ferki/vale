@@ -140,9 +140,10 @@ func (w *walker) advance(text string) int {
 	return -1
 }
 
-func (w *walker) lastTag() string {
-	if len(w.tagHistory) > 0 {
-		return w.tagHistory[len(w.tagHistory)-1]
+func (w *walker) lastTag(offset int) string {
+	size := len(w.tagHistory)
+	if size > 0 && size-offset >= 0 {
+		return w.tagHistory[size-offset]
 	}
 	return w.activeTag
 }
